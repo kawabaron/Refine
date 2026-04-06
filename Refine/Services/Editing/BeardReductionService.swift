@@ -17,16 +17,16 @@ struct BeardReductionService {
             return inputImage
         }
 
-        // 青み（色相の青〜紫成分）を軽減するために彩度を下げ、明度を少し上げる
+        // 青み軽減: 彩度を下げ明度を少し上げる
         let colorAdjust = CIFilter(name: "CIColorControls")!
         colorAdjust.setValue(inputImage, forKey: kCIInputImageKey)
-        colorAdjust.setValue(1.0 - intensity * 0.25, forKey: kCIInputSaturationKey)
-        colorAdjust.setValue(intensity * 0.04, forKey: kCIInputBrightnessKey)
+        colorAdjust.setValue(1.0 - intensity * 0.2, forKey: kCIInputSaturationKey)
+        colorAdjust.setValue(intensity * 0.03, forKey: kCIInputBrightnessKey)
 
         guard let adjusted = colorAdjust.outputImage else { return inputImage }
 
-        // 肌色寄りの暖色をわずかに加える
-        let warmColor = CIColor(red: 0.92, green: 0.82, blue: 0.75, alpha: intensity * 0.08)
+        // 暖色を軽く追加して肌に馴染ませる
+        let warmColor = CIColor(red: 0.92, green: 0.82, blue: 0.75, alpha: intensity * 0.06)
         let warmOverlay = CIImage(color: warmColor).cropped(to: inputImage.extent)
 
         let blend = CIFilter(name: "CISoftLightBlendMode")!
@@ -35,13 +35,20 @@ struct BeardReductionService {
 
         let blended = blend.outputImage ?? adjusted
 
-        // マスクで適用範囲を制限
-        let softMask = beardMask.applyingGaussianBlur(sigma: 8.0)
-        return inputImage.blended(with: blended, mask: softMask)
+        // 大きめブラーのマスクで自然にぼかす
+        return inputImage.blended(with: blended, mask: beardMask)
     }
 
-    /// ひげ領域マスク（口〜あご周辺）
+    /// 顔輪郭に沿ったひげ領域マスクを生成
     private func generateBeardMask(landmarks: FaceLandmarks, imageSize: CGSize) -> CIImage? {
+        let outerLips = landmarks.outerLips
+        let faceContour = landmarks.faceContour
+        let nose = landmarks.nose
+
+        guard outerLips.count >= 4, faceContour.count >= 5, !nose.isEmpty else {
+            return nil
+        }
+
         UIGraphicsBeginImageContext(imageSize)
         guard let ctx = UIGraphicsGetCurrentContext() else {
             UIGraphicsEndImageContext()
@@ -50,43 +57,64 @@ struct BeardReductionService {
 
         ctx.setFillColor(CGColor(gray: 0.0, alpha: 1.0))
         ctx.fill(CGRect(origin: .zero, size: imageSize))
-        ctx.setFillColor(CGColor(gray: 1.0, alpha: 1.0))
 
-        let outerLips = landmarks.outerLips
-        let faceContour = landmarks.faceContour
-        let nose = landmarks.nose
-
-        guard !outerLips.isEmpty, !faceContour.isEmpty else {
-            UIGraphicsEndImageContext()
-            return nil
-        }
-
-        // 唇の下〜あご先の領域を推定
-        let lipBottom = outerLips.map(\.y).max() ?? 0
+        // 鼻下の位置
+        let noseBottom = nose.map(\.y).max() ?? 0
         let lipCenter = CGPoint(
             x: outerLips.map(\.x).reduce(0, +) / CGFloat(outerLips.count),
             y: outerLips.map(\.y).reduce(0, +) / CGFloat(outerLips.count)
         )
-        let noseBottom = nose.map(\.y).max() ?? lipCenter.y
+
+        // 顔輪郭から「鼻下より下」の点を抽出 → あご輪郭
+        let chinContour = faceContour.filter { $0.y >= noseBottom - 5 }
+
+        guard chinContour.count >= 3 else {
+            UIGraphicsEndImageContext()
+            return nil
+        }
+
+        // ひげ領域パスを構築:
+        // 上辺: 鼻下の水平ライン（唇を少し避ける）
+        // 下辺 + 左右: 顔輪郭のあご部分
         let lipWidth = (outerLips.map(\.x).max() ?? 0) - (outerLips.map(\.x).min() ?? 0)
+        let leftX = lipCenter.x - lipWidth * 0.9
+        let rightX = lipCenter.x + lipWidth * 0.9
 
-        // あご先を推定（顔輪郭の最下部）
-        let chinBottom = faceContour.map(\.y).max() ?? (lipBottom + lipWidth)
+        var maskPoints: [CGPoint] = []
 
-        // ひげ領域: 鼻下〜あご、唇幅より少し広め
-        let beardRect = CGRect(
-            x: lipCenter.x - lipWidth * 0.8,
-            y: noseBottom,
-            width: lipWidth * 1.6,
-            height: chinBottom - noseBottom + lipWidth * 0.2
-        )
-        ctx.fillEllipse(in: beardRect)
+        // 上辺: 鼻下ライン
+        maskPoints.append(CGPoint(x: leftX, y: noseBottom))
+        maskPoints.append(CGPoint(x: lipCenter.x, y: noseBottom))
+        maskPoints.append(CGPoint(x: rightX, y: noseBottom))
+
+        // 右側を下に → あご輪郭を左へ
+        let sortedChin = chinContour.sorted { $0.x > $1.x }
+        for p in sortedChin {
+            if p.x >= leftX && p.x <= rightX {
+                maskPoints.append(p)
+            }
+        }
+
+        ctx.setFillColor(CGColor(gray: 1.0, alpha: 1.0))
+        let path = LandmarkPathHelper.smoothPath(from: maskPoints, closed: true, tension: 0.3)
+        ctx.addPath(path.cgPath)
+        ctx.fillPath()
+
+        // 唇部分を除外 (唇の上にひげ補正が乗らないように)
+        ctx.setBlendMode(.clear)
+        let lipPath = LandmarkPathHelper.smoothPath(from: outerLips, closed: true, tension: 0.5)
+        ctx.addPath(lipPath.cgPath)
+        ctx.fillPath()
+        ctx.setBlendMode(.normal)
 
         guard let img = UIGraphicsGetImageFromCurrentImageContext() else {
             UIGraphicsEndImageContext()
             return nil
         }
         UIGraphicsEndImageContext()
-        return img.toCIImage()
+
+        guard let ciImage = img.toCIImage() else { return nil }
+        // 大きめのブラーで境界を完全にぼかす
+        return ciImage.applyingGaussianBlur(sigma: 18.0)
     }
 }

@@ -16,127 +16,73 @@ struct EyebrowAdjustmentService {
 
         var result = inputImage
 
-        // 濃さ補正: 眉領域を暗くする
+        // 眉の幅から自然な太さを算出
+        let browWidth = estimateBrowWidth(landmarks.leftEyebrow, landmarks.rightEyebrow)
+        let baseThickness = browWidth * 0.08
+
+        // 濃さ補正: 眉領域をなめらかに暗くする
         if intensity > 0.01 {
-            guard let eyebrowMask = generateEyebrowMask(
-                landmarks: landmarks,
-                imageSize: imageSize
+            guard let leftMask = LandmarkPathHelper.eyebrowMask(
+                points: landmarks.leftEyebrow,
+                imageSize: imageSize,
+                baseThickness: baseThickness,
+                blurSigma: max(3.0, baseThickness * 0.6)
+            ),
+            let rightMask = LandmarkPathHelper.eyebrowMask(
+                points: landmarks.rightEyebrow,
+                imageSize: imageSize,
+                baseThickness: baseThickness,
+                blurSigma: max(3.0, baseThickness * 0.6)
             ) else {
                 return inputImage
             }
 
-            // 暗めのオーバーレイ
+            // 控えめに暗くしてコントラストを上げる
             let darkenFilter = CIFilter(name: "CIColorControls")!
             darkenFilter.setValue(result, forKey: kCIInputImageKey)
-            darkenFilter.setValue(-intensity * 0.15, forKey: kCIInputBrightnessKey)
-            darkenFilter.setValue(1.0 + intensity * 0.1, forKey: kCIInputContrastKey)
+            darkenFilter.setValue(-intensity * 0.12, forKey: kCIInputBrightnessKey)
+            darkenFilter.setValue(1.0 + intensity * 0.08, forKey: kCIInputContrastKey)
 
             if let darkened = darkenFilter.outputImage {
-                let softMask = eyebrowMask.applyingGaussianBlur(sigma: 2.0)
-                result = result.blended(with: darkened, mask: softMask)
+                result = result.blended(with: darkened, mask: leftMask)
+                result = result.blended(with: darkened, mask: rightMask)
             }
         }
 
-        // 形補正: 左右眉の対称性を改善
+        // 形補正: 左右対称性を改善
         if shapeCorrection > 0.01 {
-            // 軽い対称性補正として、片方の眉領域にわずかに他方をブレンド
-            // MVP では濃さ補正のみで対称感を出す簡易実装
-            guard let leftMask = generateSingleEyebrowMask(
+            guard let leftMask = LandmarkPathHelper.eyebrowMask(
                 points: landmarks.leftEyebrow,
-                imageSize: imageSize
+                imageSize: imageSize,
+                baseThickness: baseThickness * 0.7,
+                blurSigma: max(2.0, baseThickness * 0.5)
             ),
-            let rightMask = generateSingleEyebrowMask(
+            let rightMask = LandmarkPathHelper.eyebrowMask(
                 points: landmarks.rightEyebrow,
-                imageSize: imageSize
+                imageSize: imageSize,
+                baseThickness: baseThickness * 0.7,
+                blurSigma: max(2.0, baseThickness * 0.5)
             ) else {
                 return result
             }
 
-            // 両眉の平均的な濃さに近づける
             let uniformFilter = CIFilter(name: "CIColorControls")!
             uniformFilter.setValue(result, forKey: kCIInputImageKey)
-            uniformFilter.setValue(-shapeCorrection * 0.05, forKey: kCIInputBrightnessKey)
-            uniformFilter.setValue(1.0 + shapeCorrection * 0.08, forKey: kCIInputContrastKey)
+            uniformFilter.setValue(-shapeCorrection * 0.04, forKey: kCIInputBrightnessKey)
+            uniformFilter.setValue(1.0 + shapeCorrection * 0.06, forKey: kCIInputContrastKey)
 
             if let uniformed = uniformFilter.outputImage {
-                let leftSoft = leftMask.applyingGaussianBlur(sigma: 1.5)
-                let rightSoft = rightMask.applyingGaussianBlur(sigma: 1.5)
-                result = result.blended(with: uniformed, mask: leftSoft)
-                result = result.blended(with: uniformed, mask: rightSoft)
+                result = result.blended(with: uniformed, mask: leftMask)
+                result = result.blended(with: uniformed, mask: rightMask)
             }
         }
 
         return result
     }
 
-    /// 両眉のマスクを生成
-    private func generateEyebrowMask(landmarks: FaceLandmarks, imageSize: CGSize) -> CIImage? {
-        UIGraphicsBeginImageContext(imageSize)
-        guard let ctx = UIGraphicsGetCurrentContext() else {
-            UIGraphicsEndImageContext()
-            return nil
-        }
-
-        ctx.setFillColor(CGColor(gray: 0.0, alpha: 1.0))
-        ctx.fill(CGRect(origin: .zero, size: imageSize))
-        ctx.setFillColor(CGColor(gray: 1.0, alpha: 1.0))
-
-        drawEyebrowPath(ctx: ctx, points: landmarks.leftEyebrow)
-        drawEyebrowPath(ctx: ctx, points: landmarks.rightEyebrow)
-
-        guard let img = UIGraphicsGetImageFromCurrentImageContext() else {
-            UIGraphicsEndImageContext()
-            return nil
-        }
-        UIGraphicsEndImageContext()
-        return img.toCIImage()
-    }
-
-    /// 片方の眉マスクを生成
-    private func generateSingleEyebrowMask(points: [CGPoint], imageSize: CGSize) -> CIImage? {
-        UIGraphicsBeginImageContext(imageSize)
-        guard let ctx = UIGraphicsGetCurrentContext() else {
-            UIGraphicsEndImageContext()
-            return nil
-        }
-
-        ctx.setFillColor(CGColor(gray: 0.0, alpha: 1.0))
-        ctx.fill(CGRect(origin: .zero, size: imageSize))
-        ctx.setFillColor(CGColor(gray: 1.0, alpha: 1.0))
-
-        drawEyebrowPath(ctx: ctx, points: points)
-
-        guard let img = UIGraphicsGetImageFromCurrentImageContext() else {
-            UIGraphicsEndImageContext()
-            return nil
-        }
-        UIGraphicsEndImageContext()
-        return img.toCIImage()
-    }
-
-    private func drawEyebrowPath(ctx: CGContext, points: [CGPoint]) {
-        guard points.count >= 3 else { return }
-
-        // 眉の厚みを追加するため、点群を上下にオフセットしてパスを作成
-        let center = CGPoint(
-            x: points.map(\.x).reduce(0, +) / CGFloat(points.count),
-            y: points.map(\.y).reduce(0, +) / CGFloat(points.count)
-        )
-        let width = (points.map(\.x).max() ?? 0) - (points.map(\.x).min() ?? 0)
-        let thickness = width * 0.12
-
-        ctx.beginPath()
-        // 上側
-        for (i, point) in points.enumerated() {
-            let p = CGPoint(x: point.x, y: point.y - thickness)
-            if i == 0 { ctx.move(to: p) } else { ctx.addLine(to: p) }
-        }
-        // 下側（逆順）
-        for point in points.reversed() {
-            let p = CGPoint(x: point.x, y: point.y + thickness)
-            ctx.addLine(to: p)
-        }
-        ctx.closePath()
-        ctx.fillPath()
+    private func estimateBrowWidth(_ left: [CGPoint], _ right: [CGPoint]) -> CGFloat {
+        let leftW = (left.map(\.x).max() ?? 0) - (left.map(\.x).min() ?? 0)
+        let rightW = (right.map(\.x).max() ?? 0) - (right.map(\.x).min() ?? 0)
+        return max(leftW, rightW)
     }
 }

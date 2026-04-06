@@ -13,29 +13,34 @@ struct ComplexionAdjustmentService {
     ) -> CIImage {
         guard intensity > 0.01 else { return inputImage }
 
-        // 頬マスクを生成
         guard let cheekMask = generateCheekMask(landmarks: landmarks, imageSize: imageSize) else {
             return inputImage
         }
 
-        // 赤みのオーバーレイカラー画像を生成
-        let warmColor = CIColor(red: 0.85, green: 0.45, blue: 0.4, alpha: intensity * 0.18)
+        // 暖色のソフトライトブレンドで自然な血色感
+        let warmColor = CIColor(red: 0.85, green: 0.45, blue: 0.4, alpha: intensity * 0.15)
         let colorImage = CIImage(color: warmColor).cropped(to: inputImage.extent)
 
-        // ソフトライトブレンドで血色感を追加
         let blend = CIFilter(name: "CISoftLightBlendMode")!
         blend.setValue(colorImage, forKey: kCIInputImageKey)
         blend.setValue(inputImage, forKey: kCIInputBackgroundImageKey)
 
         guard let blended = blend.outputImage else { return inputImage }
 
-        // 頬マスクで適用範囲を限定
-        let softMask = cheekMask.applyingGaussianBlur(sigma: 12.0)
-        return inputImage.blended(with: blended, mask: softMask)
+        return inputImage.blended(with: blended, mask: cheekMask)
     }
 
-    /// 頬領域マスクを生成
+    /// 頬領域のグラデーションマスクを生成
     private func generateCheekMask(landmarks: FaceLandmarks, imageSize: CGSize) -> CIImage? {
+        let nose = landmarks.nose
+        let leftEye = landmarks.leftEye
+        let rightEye = landmarks.rightEye
+        let faceContour = landmarks.faceContour
+
+        guard !nose.isEmpty, !leftEye.isEmpty, !rightEye.isEmpty else {
+            return nil
+        }
+
         UIGraphicsBeginImageContext(imageSize)
         guard let ctx = UIGraphicsGetCurrentContext() else {
             UIGraphicsEndImageContext()
@@ -44,17 +49,6 @@ struct ComplexionAdjustmentService {
 
         ctx.setFillColor(CGColor(gray: 0.0, alpha: 1.0))
         ctx.fill(CGRect(origin: .zero, size: imageSize))
-        ctx.setFillColor(CGColor(gray: 1.0, alpha: 1.0))
-
-        // 鼻と目の位置から頬の領域を推定
-        let nose = landmarks.nose
-        let leftEye = landmarks.leftEye
-        let rightEye = landmarks.rightEye
-
-        guard !nose.isEmpty, !leftEye.isEmpty, !rightEye.isEmpty else {
-            UIGraphicsEndImageContext()
-            return nil
-        }
 
         let noseCenter = CGPoint(
             x: nose.map(\.x).reduce(0, +) / CGFloat(nose.count),
@@ -70,38 +64,57 @@ struct ComplexionAdjustmentService {
         )
 
         let eyeDistance = leftEyeCenter.distance(to: rightEyeCenter)
-        let cheekRadius = eyeDistance * 0.3
+        let cheekRadius = eyeDistance * 0.28
 
-        // 左頬
-        let leftCheek = CGPoint(
-            x: leftEyeCenter.x,
-            y: noseCenter.y + cheekRadius * 0.3
+        // 顔輪郭の左右端を使って頬位置をより正確に推定
+        let faceLeft = faceContour.map(\.x).min() ?? leftEyeCenter.x
+        let faceRight = faceContour.map(\.x).max() ?? rightEyeCenter.x
+
+        // 左頬: 目と輪郭の中間あたり、鼻の高さ
+        let leftCheekCenter = CGPoint(
+            x: (leftEyeCenter.x + faceLeft) / 2,
+            y: noseCenter.y + cheekRadius * 0.15
         )
-        ctx.fillEllipse(in: CGRect(
-            x: leftCheek.x - cheekRadius,
-            y: leftCheek.y - cheekRadius * 0.7,
-            width: cheekRadius * 2,
-            height: cheekRadius * 1.4
-        ))
-
         // 右頬
-        let rightCheek = CGPoint(
-            x: rightEyeCenter.x,
-            y: noseCenter.y + cheekRadius * 0.3
+        let rightCheekCenter = CGPoint(
+            x: (rightEyeCenter.x + faceRight) / 2,
+            y: noseCenter.y + cheekRadius * 0.15
         )
-        ctx.fillEllipse(in: CGRect(
-            x: rightCheek.x - cheekRadius,
-            y: rightCheek.y - cheekRadius * 0.7,
-            width: cheekRadius * 2,
-            height: cheekRadius * 1.4
-        ))
 
-        guard let maskUIImage = UIGraphicsGetImageFromCurrentImageContext() else {
+        // ラジアルグラデーションで自然な頬紅効果
+        let colorSpace = CGColorSpaceCreateDeviceGray()
+
+        for cheekCenter in [leftCheekCenter, rightCheekCenter] {
+            let colors = [
+                CGColor(gray: 1.0, alpha: 1.0),
+                CGColor(gray: 0.0, alpha: 1.0)
+            ] as CFArray
+            let locations: [CGFloat] = [0.0, 1.0]
+
+            if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: locations) {
+                ctx.saveGState()
+                // 楕円形にするため縦方向をスケール
+                ctx.translateBy(x: cheekCenter.x, y: cheekCenter.y)
+                ctx.scaleBy(x: 1.0, y: 0.7)
+                ctx.drawRadialGradient(
+                    gradient,
+                    startCenter: .zero,
+                    startRadius: 0,
+                    endCenter: .zero,
+                    endRadius: cheekRadius,
+                    options: []
+                )
+                ctx.restoreGState()
+            }
+        }
+
+        guard let img = UIGraphicsGetImageFromCurrentImageContext() else {
             UIGraphicsEndImageContext()
             return nil
         }
         UIGraphicsEndImageContext()
 
-        return maskUIImage.toCIImage()
+        guard let ciImage = img.toCIImage() else { return nil }
+        return ciImage.applyingGaussianBlur(sigma: 15.0)
     }
 }
