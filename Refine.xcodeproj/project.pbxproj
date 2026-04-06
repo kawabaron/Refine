@@ -87,12 +87,12 @@
 		16A7FDE9B55C6EFF43D5C36A /* PresetRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetRepository.swift; sourceTree = "<group>"; };
 		CABDD8A4AF28FFAF04A093D1 /* FaceDetectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceDetectionService.swift; sourceTree = "<group>"; };
 		6132E89C7ABE4C02C1DCFD19 /* LandmarkConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LandmarkConverter.swift; sourceTree = "<group>"; };
-		5779A56E0B4DEB4C8DA3161B /* CGPoint+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CGPoint+Extensions.swift; sourceTree = "<group>"; };
-		AE5354913E14FE9CCCEF88BB /* CGRect+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CGRect+Extensions.swift; sourceTree = "<group>"; };
-		CCE479634054331FA49AB8AC /* CIImage+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CIImage+Extensions.swift; sourceTree = "<group>"; };
+		5779A56E0B4DEB4C8DA3161B /* CGPoint+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CGPoint+Extensions.swift"; sourceTree = "<group>"; };
+		AE5354913E14FE9CCCEF88BB /* CGRect+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CGRect+Extensions.swift"; sourceTree = "<group>"; };
+		CCE479634054331FA49AB8AC /* CIImage+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CIImage+Extensions.swift"; sourceTree = "<group>"; };
 		AB9D80F47862D3C435860760 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		BF3182AB61516F15A5BE3634 /* ImageRenderContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageRenderContext.swift; sourceTree = "<group>"; };
-		18CA6D09D824CC9AF08C391F /* UIImage+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIImage+Extensions.swift; sourceTree = "<group>"; };
+		18CA6D09D824CC9AF08C391F /* UIImage+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UIImage+Extensions.swift"; sourceTree = "<group>"; };
 		B90AB0C2E873C2298A210565 /* EditorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorViewModel.swift; sourceTree = "<group>"; };
 		FE0ECAB83955B8FC54B77590 /* ExportViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportViewModel.swift; sourceTree = "<group>"; };
 		7E7718E2DFA0C118B6B52EEE /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
@@ -461,8 +461,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSTCOMPILER_EXEC = swiftc;
-				CLANG_ANALYZER_NONNULL = YES;
+					CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CLANG_ENABLE_MODULES = YES;
@@ -515,7 +514,10 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = (
+					"DEBUG",
+					"$(inherited)",
+				);
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
